@@ -51,35 +51,50 @@ public class Block
 
     int getNextBNO()
     {
-        return bb.getInt(POS_NO);
+//        return bb.getInt(POS_NO);
+    	return getNextBNO(bb);
     }
     int getLen()
     {
-        return bb.getInt(POS_LEN) ;
+//        return bb.getInt(POS_LEN) ;
+    	return getLen(bb);
     }
     void setLen(int v)
     {
-        bb.putInt(POS_LEN, v);
+//        bb.putInt(POS_LEN, v);
+    	setLen(v);
     }
-    void free()
-    {
-        for(int i=0;i<getMetaSize();i++)
-            bb.put(i, (byte)0);
-    }
+    /**
+     * 设置nextBNO，并且设置next
+     * @param b
+     */
     void setNext(Block b)
     {
-        next = b;
-        bb.putInt(POS_NO, b.blockNo);
+        setNextBNO(bb, b.blockNo);
+        linkNext(b);
+    }
+    /**
+     * 仅仅设置next
+     * @param b
+     */
+    void linkNext(Block b)
+    {
+    	next = b;
     }
     Block getNext()
     {
         return next;
     }
-    static int getMetaSize()
-    {
-        return POS_DATA;
-    }
     
+    void free()
+    {
+        for(int i=0;i<getMetaSize();i++)
+            bb.put(i, (byte)0);
+    }
+    void markAsUsed()
+    {
+    	bb.putInt(POS_NO, -1);
+    }
     /******************************************
      *  下面涉及实际数据区的操作,由Key/Value自行定义
      * *****************************************
@@ -114,10 +129,32 @@ public class Block
         bb.put(v, offset, length);
         return length;
     }
+    
+    ////------- 静态方法
+    static int getMetaSize()
+    {
+    	return POS_DATA;
+    }
+    static int getNextBNO(ByteBuffer bb)
+    {
+    	return bb.getInt(POS_NO);
+    }
+    static void setNextBNO(ByteBuffer bb, int bno)
+    {
+    	bb.putInt(POS_NO, bno);
+    }
+    static int getLen(ByteBuffer bb)
+    {
+    	return bb.getInt(POS_LEN) ;
+    }
+    static void setLen(ByteBuffer bb, int v)
+    {
+    	bb.putInt(POS_LEN, v);
+    }
 
     public String toString()
     {
         return blockNo+"~"+bb;
     }
-   
+    //
 }

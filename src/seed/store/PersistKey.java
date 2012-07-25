@@ -1,9 +1,10 @@
 package seed.store;
 
 import java.nio.ByteBuffer;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.Map;
 
 import org.apache.log4j.Logger;
 
@@ -18,15 +19,18 @@ import seed.utils.Utils;
 public class PersistKey implements PersistConst
 {
     Logger log = Logger.getLogger("kvstore");
-    private static final ReentrantReadWriteLock locker = new ReentrantReadWriteLock();
-    ConcurrentLinkedQueue<Block> poolInFree = new ConcurrentLinkedQueue<Block>();
-    ConcurrentHashMap<Integer, Block> poolHash = new ConcurrentHashMap<Integer, Block>();
+//    private static final ReentrantReadWriteLock locker = new ReentrantReadWriteLock();
+    LinkedList<Block> poolInFree = new LinkedList<Block>();
+    Map<Integer, Block> poolHash = new HashMap<Integer, Block>();
+    Map<Integer, Block> poolInUse = new HashMap<Integer, Block>();
 
     /**
      * blockBytes = metaBytes + keyBytes
      */
     private final int blockBytes ;    // byteSize
     private final int keyBytes ;
+    private final int maxBlockCnt ;	// 最大block数
+    private final ByteBuffer buffer;	// 存储区
     
     private static final int LEN_VBNO = 4;
 
@@ -88,15 +92,28 @@ public class PersistKey implements PersistConst
         this.blockBytes = POS_DATA_START + kBytes ;
         this.keyBytes = kBytes;
         int freeBytes = buffer.capacity() - buffer.position();
-        int cnt = freeBytes / this.blockBytes, offset = 0;
-        for(int i=1;i<=cnt;i++)
+        this.maxBlockCnt = freeBytes / this.blockBytes;
+        this.buffer = buffer;
+        int offset = 0;
+        Block block ;
+        for(int i=1;i<=maxBlockCnt;i++)
         {
             offset = (i-1) * this.blockBytes;
             buffer.position( offset );
             buffer.limit(offset+ this.blockBytes);
-            poolInFree.add(new Block(i, buffer.slice()));
+            block = new Block(i, buffer.slice());
+            
+            if(block.getNextBNO() != 0)	// 被占用了
+            	poolInUse.put(block.blockNo, block);
+            else
+            	poolInFree.add(block);
         }
-
+        //
+        for(Block b : poolInUse.values())
+        {
+        	block = poolInUse.get(b.getNextBNO());
+        	b.linkNext(block);
+        }
     }
 
     /**
@@ -120,6 +137,12 @@ public class PersistKey implements PersistConst
             poolHash.remove(b.blockNo);
         poolInFree.offer(b);
     }
+    
+    private byte[] getK(Block head)
+    {
+    	
+    }
+    
     /**
      * 取key的blockNo,如果-1则说明没此key
      * @param hash
@@ -193,42 +216,41 @@ public class PersistKey implements PersistConst
         }
         Block b= null, p = null, firstp = null;
         int offset = 0;
-        locker.writeLock().lock();
-        try
+        // 存入一个key
+        for(int i=0;i<blockNeed;i++)
         {
-            // 存入一个key
-            for(int i=0;i<blockNeed;i++)
+            b = poolInFree.poll();
+            if(b == null)
             {
-                b = poolInFree.poll();
-                if(p == null)
-                {
-                    offset += writeKatFirstBlock(b, key, offset);
-                    firstp = b;
-                } else
-                {
-                    offset += writeKatAfterBlock(b, key, offset);
-                    p.setNext(b);
-                }
-                p = b;
-                if(offset >= key.length)
-                    break;
+            	// TODO 正常情况不会到达这,需要recycle分配出来的block
+            	log.error("add(),hash="+hash+",keyLen="+key.length+",no_space,need recycle!");
+            	return Block.NOT_ENOUGH;
             }
-            /*
-             * p : 此key占用block链上最后一个block
-             * firstp : 此key占用block链上第一个block
-             */
-            firstp.setLen(key.length);
-            b = poolHash.get(hash);
-            //把自己放最前面
-            if(b != null)
+            if(p == null)
+            {
+                offset += writeKatFirstBlock(b, key, offset);
+                firstp = b;
+            } else
+            {
+                offset += writeKatAfterBlock(b, key, offset);
                 p.setNext(b);
-            //放入hash索引表
-            poolHash.put(hash, firstp);
+            }
+            p = b;
+            if(offset >= key.length)
+                break;
         }
-        finally
-        {
-            locker.writeLock().unlock();
-        }
+        /*
+         * p : 此key占用block链上最后一个block
+         * firstp : 此key占用block链上第一个block
+         */
+        firstp.setLen(key.length);
+        b = poolHash.get(hash);
+        //把自己放最前面
+        if(b != null)
+            p.setNext(b);
+        //放入hash索引表
+        poolHash.put(hash, firstp);
+        poolInUse.put(firstp.blockNo, firstp);
         return firstp;
     }
     
@@ -303,6 +325,37 @@ public class PersistKey implements PersistConst
             // 继续读下一个key
         }
         return false;
+    }
+    
+    private class Itr extends BlockItr
+    {
+    	public Itr()
+    	{
+    		super(buffer, maxBlockCnt, blockBytes);
+    	}
+    	
+		@Override
+		public boolean hasNext() {
+			// TODO Auto-generated method stub
+			return false;
+		}
+
+		@Override
+		public Block next() {
+			Block b = searchNext();
+			if(b != null)
+			{
+				
+			}
+			return null;
+		}
+
+		@Override
+		public void remove() {
+			// TODO Auto-generated method stub
+			
+		}
+    	
     }
 
 }
