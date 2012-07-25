@@ -6,7 +6,7 @@ import java.util.Random;
 import org.apache.log4j.Logger;
 import org.apache.log4j.PropertyConfigurator;
 
-import seed.Utils.Utils;
+import seed.utils.Utils;
 
 public class PersistKVStoreTest
 {
