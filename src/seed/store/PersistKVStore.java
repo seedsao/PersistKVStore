@@ -37,7 +37,7 @@ public class PersistKVStore
     protected final FileChannel pvChannel;
     protected final MappedByteBuffer pvBuffer;
     
-    public PersistKVStore(String path, String fileName, int keyBytes, int valueBytes, int count) throws IOException
+	public PersistKVStore(String path, String fileName, int keyBytes, int valueBytes, int count) throws IOException
     {
         RandomAccessFile raf;
         FileChannel fch ;
@@ -58,6 +58,7 @@ public class PersistKVStore
         PV = new PersistValue(valueBytes, mbb);
         pvChannel = fch;
         pvBuffer = mbb;
+        
     }
 
     public boolean putIfAbsent(byte[] k, byte[] v)
