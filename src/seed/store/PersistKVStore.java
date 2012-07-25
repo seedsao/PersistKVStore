@@ -8,8 +8,8 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-import seed.Utils.P;
-import seed.Utils.Utils;
+import seed.utils.P;
+import seed.utils.Utils;
 /**
  * a persist key-value store basis of mmap
  * TODO 用文件锁加起安全

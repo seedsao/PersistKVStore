@@ -1,4 +1,4 @@
-package seed.Utils;
+package seed.utils;
 
 import java.util.Random;
 

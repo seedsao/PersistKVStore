@@ -7,8 +7,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.apache.log4j.Logger;
 
-import seed.Utils.P;
-import seed.Utils.Utils;
+import seed.utils.P;
+import seed.utils.Utils;
 
 /**
  * key存储区
