@@ -1,0 +1,8 @@
+a limit persist key-value store basis of mmap
+1. limit -- 容量有限的key/value store
+2. mmap -- 基于mmap
+3. 使锁保证线程安全,并不是无锁的并发实现
+4. 只支持byte[]的数据存储    
+
+协议
+1. 无任何使用限制,当然保留本人的名字能最好--基于程序猿的虚荣心:)
