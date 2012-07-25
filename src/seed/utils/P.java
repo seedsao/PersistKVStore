@@ -1,4 +1,4 @@
-package seed.Utils;
+package seed.utils;
 
 /**
  * make use simple
