@@ -23,32 +23,59 @@ public class PersistValue implements PersistConst
      */
     private final int blockBytes;
     private final int valueBytes ;
-    
+    private final int maxBlockCnt ;    // 最大block数
+    final ByteBuffer buffer;    // 存储区
+
     private static final int POS_DATA_START = Block.getMetaSize();
-    
+
     int writeV(Block block, byte[] v, int offset)
     {
         return block._writeAt(POS_DATA_START, v, offset);
     }
-    
+
     int readV(Block block, ByteBuffer dst)
     {
         return block._readAt(POS_DATA_START, dst);
     }
-    
+
     public PersistValue(int vBytes, ByteBuffer buffer)
     {
         this.blockBytes = vBytes + POS_DATA_START;
         this.valueBytes = vBytes;
         int freeBytes = buffer.capacity() - buffer.position();
-        int cnt = freeBytes / blockBytes, offset = 0;
-        for(int i=1;i<=cnt;i++)
+        this.maxBlockCnt = freeBytes / this.blockBytes;
+        this.buffer = buffer;
+        // -- 组装
+        int offset = 0;
+        Block block ;
+        Map<Integer, Block> poolInUse = new HashMap<Integer, Block>();
+        for(int i=1;i<=maxBlockCnt;i++)
         {
             offset = (i-1) * this.blockBytes;
             buffer.position( offset );
             buffer.limit(offset+ this.blockBytes);
-            poolInFree.add(new Block(i, buffer.slice()));
+            block = new Block(i, buffer.slice());
+
+            if(block.getNextBNO() != 0)    // 被占用了
+            {
+                poolInUse.put(block.blockNo, block);
+                if(block.getLen() > 0)  // 说明是head节点
+                    headInUse.put(block.blockNo, block);
+            }
+            else
+            {
+                poolInFree.add(block);
+            }
         }
+        // -- 链起来
+        for(Block b : poolInUse.values())
+        {
+            block = poolInUse.get(b.getNextBNO());
+            b.linkNext(block);
+        }
+        poolInUse.clear();  // 释放
+        poolInUse = null;
+        System.gc();    // 哥来触发一下
     }
 
     /**
@@ -73,7 +100,9 @@ public class PersistValue implements PersistConst
         P<Integer, Block> p = P.join(0, null);
         if(b==null)
             return p;
+        System.out.println("start_41");
         for(;b != null;b = b.getNext()) {
+            System.out.println("start_42");
             p.a ++;
             p.b = b;
         }
@@ -99,19 +128,20 @@ public class PersistValue implements PersistConst
         P<Integer, Block> p = findBlockAndCntInChain(b);
         if(p.a == 0)
             return Block.emptyV;
-        
+
         byte[] v = new byte[b.getLen()];
         ByteBuffer dst = ByteBuffer.wrap(v);
         int len = 0;
         for(;b != null; b=b.getNext())
         {
+            System.out.println(b);
             len += readV(b, dst);
             if(len >= v.length)
                 break;
         }
         return v;
     }
-    
+
     private void recycle(Block b, boolean isHead)
     {
         if(b == null)
@@ -135,7 +165,7 @@ public class PersistValue implements PersistConst
         P<Integer, Block> p = findBlockAndCntInChain(b);
         if(p.a == 0)
             return Block.emptyV;
-        
+
         // 一边读一边free掉
         boolean isHead = true;
         byte[] v = null;
@@ -145,14 +175,11 @@ public class PersistValue implements PersistConst
             v = new byte[b.getLen()];
             dst = ByteBuffer.wrap(v);
         }
-        int len = 0;
         for(Block old;b != null; )
         {
             if(dst != null)
             {
-                len += readV(b, dst);
-                if(len >= v.length)
-                    break;
+                readV(b, dst);
             }
             old = b;
             b = b.getNext();
@@ -161,12 +188,12 @@ public class PersistValue implements PersistConst
         }
         return v;
     }
-    
+
     byte[] remove(int vbno)
     {
         return _remove(vbno, true);
     }
-    
+
     void remove2(int vbno)
     {
         _remove(vbno, false);
@@ -187,7 +214,7 @@ public class PersistValue implements PersistConst
         P<Integer, Block> info = findBlockAndCntInChain(firstb);    // 剩余需要的块数
         n -= info.a;
         //
-        if(n > 0) 
+        if(n > 0)
         {   // 还需要申请n个块
             locker.writeLock().lock();
             try
@@ -195,7 +222,7 @@ public class PersistValue implements PersistConst
                 if(n > poolInFree.size())
                     return Block.NOT_ENOUGH;
                 Block t;
-                for(;n>0;n--) 
+                for(;n>0;n--)
                 {
                     t = poolInFree.poll();
                     if(t == null)
@@ -208,7 +235,7 @@ public class PersistValue implements PersistConst
                     }
                 }
             } finally {
-               locker.writeLock().unlock(); 
+               locker.writeLock().unlock();
             }
         }
         // --到这则p.b肯定不会为null

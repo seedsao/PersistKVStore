@@ -6,59 +6,63 @@ import java.io.RandomAccessFile;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
+import java.util.Iterator;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
+import seed.store.PersistKey.PKItr;
 import seed.utils.P;
 import seed.utils.Utils;
 /**
  * a persist key-value store basis of mmap
  * TODO 用文件锁加起安全
+ * TODO 读写锁也要用起来
  * @author seedshao
  *
  */
 public class PersistKVStore
 {
     protected  static final int lsize = 97;
-    protected  ReentrantReadWriteLock[] locker = new ReentrantReadWriteLock[lsize];
-    ReentrantReadWriteLock getLocker(int hash)
-    {
-        if(hash == Integer.MIN_VALUE)
-            return locker[17];
-        hash = hash<0 ? -hash : hash;
-        return locker[hash % lsize];
-    }
+    private ReentrantReadWriteLock locker = new ReentrantReadWriteLock();
+//    protected  ReentrantReadWriteLock[] locker = new ReentrantReadWriteLock[lsize];
+//    ReentrantReadWriteLock getLocker(int hash)
+//    {
+//        if(hash == Integer.MIN_VALUE)
+//            return locker[17];
+//        hash = hash<0 ? -hash : hash;
+//        return locker[hash % lsize];
+//    }
 
     protected  final PersistKey PK ;
     protected  final PersistValue PV;
-    
+
     protected  final FileChannel pkChannel;
     protected  final MappedByteBuffer pkBuffer;
-    
+
     protected final FileChannel pvChannel;
     protected final MappedByteBuffer pvBuffer;
-    
-	public PersistKVStore(String path, String fileName, int keyBytes, int valueBytes, int count) throws IOException
+
+    public PersistKVStore(String path, String fileName, int keyBytes, int valueBytes, int count) throws IOException
     {
         RandomAccessFile raf;
         FileChannel fch ;
         MappedByteBuffer mbb ;
-        
+
         raf = new RandomAccessFile(new File(path+"/"+fileName+".idx"), "rw");
         fch = raf.getChannel();
         mbb = fch.map(MapMode.READ_WRITE, 0, count * keyBytes);
-        
+
         PK = new PersistKey(keyBytes, mbb);
         pkChannel = fch;
         pkBuffer = mbb;
-        
+
         raf = new RandomAccessFile(new File(path+"/"+fileName+".dat"), "rw");
         fch = raf.getChannel();
         mbb = fch.map(MapMode.READ_WRITE, 0, count * keyBytes);
-        
+
         PV = new PersistValue(valueBytes, mbb);
         pvChannel = fch;
         pvBuffer = mbb;
-        
+
     }
 
     public boolean putIfAbsent(byte[] k, byte[] v)
@@ -100,9 +104,11 @@ public class PersistKVStore
     public byte[] get(byte[] k)
     {
         int h = Utils.hash(k);
+        System.out.println("start_11");
         P<Block, Integer> p = PK.getVNO(h, k);
         if(p == null)
             return null;
+        System.out.println("start_12");
         return PV.read(p.b);
     }
 
@@ -113,5 +119,53 @@ public class PersistKVStore
         if(p == null)
             return null;
         return PV.remove(p.b);
+    }
+
+    public Iterator<byte[]> keyIterator()
+    {
+        return new KeyItrWrapper();
+    }
+
+    /**
+     * key上的迭代器
+     * @author seedshao
+     *
+     */
+    class KeyItrWrapper implements Iterator<byte[]>{
+
+        PKItr pkItr = PK.new PKItr();
+
+        public boolean hasNext() {
+            locker.readLock().lock();
+            try
+            {
+                return pkItr.hasNext();
+            } finally
+            {
+                locker.readLock().unlock();
+            }
+        }
+
+        public byte[] next() {
+            locker.readLock().lock();
+            try
+            {
+                return pkItr.next();
+            } finally
+            {
+                locker.readLock().unlock();
+            }
+        }
+
+        public void remove() {
+            locker.writeLock().lock();
+            try
+            {
+                pkItr.remove();
+            } finally
+            {
+                locker.writeLock().unlock();
+            }
+        }
     }
 }

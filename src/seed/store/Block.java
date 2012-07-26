@@ -16,7 +16,7 @@ public class Block
 {
     public static final Block NILL= new Block();
     public static final Block NOT_ENOUGH = new Block();
-    
+
     public static final byte[] emptyK = new byte[0];
     public static final byte[] emptyV = new byte[0];
     /**
@@ -27,7 +27,7 @@ public class Block
      * 2.block的数据区域
      * 4byte -- pointer to data (vPointer)[注意当keyLen>0时,此4byte才是vPointer]
      * .... -- key的数据区域
-     * 
+     *
      * 不要修改它的limit等值
      */
     public static final int POS_NO = 0;
@@ -37,12 +37,12 @@ public class Block
     final int blockNo;
     final ByteBuffer bb;
     private Block next;
-    
+
     private Block(){
         blockNo = -1;
         bb = null;
     }
-    
+
     public Block(int bno, ByteBuffer bb)
     {
         blockNo = bno;
@@ -52,17 +52,17 @@ public class Block
     int getNextBNO()
     {
 //        return bb.getInt(POS_NO);
-    	return getNextBNO(bb);
+        return getNextBNO(bb);
     }
     int getLen()
     {
 //        return bb.getInt(POS_LEN) ;
-    	return getLen(bb);
+        return getLen(bb);
     }
     void setLen(int v)
     {
 //        bb.putInt(POS_LEN, v);
-    	setLen(v);
+        setLen(bb, v);
     }
     /**
      * 设置nextBNO，并且设置next
@@ -79,13 +79,13 @@ public class Block
      */
     void linkNext(Block b)
     {
-    	next = b;
+        next = b;
     }
     Block getNext()
     {
         return next;
     }
-    
+
     void free()
     {
         for(int i=0;i<getMetaSize();i++)
@@ -93,7 +93,7 @@ public class Block
     }
     void markAsUsed()
     {
-    	bb.putInt(POS_NO, -1);
+        bb.putInt(POS_NO, -1);
     }
     /******************************************
      *  下面涉及实际数据区的操作,由Key/Value自行定义
@@ -101,7 +101,7 @@ public class Block
      * @param position
      * @param dst
      */
-    
+
     int _readAt(int position, ByteBuffer dst)
     {
         int k = 0;
@@ -121,7 +121,7 @@ public class Block
      */
     int _writeAt(int position, byte[] v, int offset)
     {
-        
+
         int keyBytes = bb.capacity() - (position > POS_DATA ? position : POS_DATA );
         int length = v.length - offset;
         length = keyBytes > length ? length : keyBytes;
@@ -129,27 +129,27 @@ public class Block
         bb.put(v, offset, length);
         return length;
     }
-    
+
     ////------- 静态方法
     static int getMetaSize()
     {
-    	return POS_DATA;
+        return POS_DATA;
     }
     static int getNextBNO(ByteBuffer bb)
     {
-    	return bb.getInt(POS_NO);
+        return bb.getInt(POS_NO);
     }
     static void setNextBNO(ByteBuffer bb, int bno)
     {
-    	bb.putInt(POS_NO, bno);
+        bb.putInt(POS_NO, bno);
     }
     static int getLen(ByteBuffer bb)
     {
-    	return bb.getInt(POS_LEN) ;
+        return bb.getInt(POS_LEN) ;
     }
     static void setLen(ByteBuffer bb, int v)
     {
-    	bb.putInt(POS_LEN, v);
+        bb.putInt(POS_LEN, v);
     }
 
     public String toString()
