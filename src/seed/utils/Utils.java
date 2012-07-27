@@ -106,6 +106,8 @@ public class Utils
     public static String join(byte[] b, String separator)
     {
         String s = "";
+        if(b == null)
+        	return s;
         for (byte k : b)
             s += k + separator;
         return s;

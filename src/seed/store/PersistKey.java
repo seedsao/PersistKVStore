@@ -4,6 +4,8 @@ import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.Map.Entry;
 
 import org.apache.log4j.Logger;
 
@@ -110,12 +112,23 @@ public class PersistKey implements PersistConst
                 poolInFree.add(block);
         }
         // -- 分析并链起来
-        for(Block b : poolInUse.values())
+        for(Block _b : poolInUse.values())
         {
-            block = poolInUse.get(b.getNextBNO());
-            b.linkNext(block);
+            block = poolInUse.get(_b.getNextBNO());
+            _b.join(block);
         }
-        poolInUse.clear();  // 释放
+        // -- 分析并放入hash
+        for(Block _b : poolInUse.values())
+        {
+        	// 要求必须是链上的第一个block,其实getPreNo==0是充要条件了，后面一定会>0
+        	if(_b.getPreNo() == 0 && _b.getLen() > 0)
+        	{
+                byte[] key = readCurrentKey(_b);
+                poolHash.put(Utils.hash(key), _b);
+        	}
+        }
+        // -- 释放
+        poolInUse.clear();  
         poolInUse = null;
         System.gc();    // 哥来触发一下
     }
@@ -141,10 +154,31 @@ public class PersistKey implements PersistConst
             poolHash.remove(b.blockNo);
         poolInFree.offer(b);
     }
-
+    
+    
+    private byte[] readCurrentKey(Block head)
+    {
+    	int klen = head.getLen();
+    	if(klen <= 0)
+    		return null;
+    	ByteBuffer kbb = ByteBuffer.wrap(new byte[klen + LEN_VBNO]);
+        byte[] key = new byte[klen];
+        readAhead(head, kbb);
+        kbb.position(LEN_VBNO);
+        for(int i=0;i<key.length;i++)
+            key[i] = kbb.get();
+        return key;
+    }
+    /**
+     * 从head处开始一直读完此key,返回下一个key,null表明此无更多key了
+     * @param head	: 必须是(klen>0的)头块
+     * @param kbb	: key将读到此kbb中
+     * @return	：返回此冲突链上下一个key, null表明无更多key了
+     */
     private Block readAhead(Block head, ByteBuffer kbb)
     {
         int klen = head.getLen();
+        Utils.assertTrue(klen>0, "readAhead(),head="+head+",klen="+klen+"<=0");
         // 到这来一定保证klen>0即当前b为key的头块
         klen += LEN_VBNO;  // 我们要多读4字节(LEN_VBNO)出来
         /*
@@ -366,6 +400,21 @@ public class PersistKey implements PersistConst
         return false;
     }
 
+    public void print()
+    {
+    	log.info("---------------------poolHashStart------------------");
+    	for(Entry<Integer, Block> e: new TreeMap<Integer, Block>(poolHash).entrySet())
+    	{
+    		log.info(e.getKey()+"~"+e.getValue()+"~"+Utils.join(readCurrentKey(e.getValue()), ","));
+    	}
+    	log.info("---------------------poolHashEnd------------------");
+    }
+    
+    /**
+     * 迭代器
+     * @author seed2
+     *
+     */
     class PKItr extends BlockItr
     {
         public PKItr()
@@ -382,15 +431,7 @@ public class PersistKey implements PersistConst
         public byte[] next() {
             Block b = searchNext(true);
             if(b != null && b.getLen() > 0)
-            {
-                ByteBuffer kbb = ByteBuffer.wrap(new byte[b.getLen() + LEN_VBNO]);
-                byte[] key = new byte[b.getLen()];
-                readAhead(b, kbb);
-                kbb.position(LEN_VBNO);
-                for(int i=0;i<key.length;i++)
-                    key[i] = kbb.get();
-                return key;
-            }
+                return readCurrentKey(b);
             return null;
         }
 

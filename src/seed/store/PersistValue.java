@@ -68,11 +68,12 @@ public class PersistValue implements PersistConst
             }
         }
         // -- 链起来
-        for(Block b : poolInUse.values())
+        for(Block _b : poolInUse.values())
         {
-            block = poolInUse.get(b.getNextBNO());
-            b.linkNext(block);
+            block = poolInUse.get(_b.getNextBNO());
+            _b.join(block);
         }
+        // -- 释放
         poolInUse.clear();  // 释放
         poolInUse = null;
         System.gc();    // 哥来触发一下
@@ -129,6 +130,7 @@ public class PersistValue implements PersistConst
         if(p.a == 0)
             return Block.emptyV;
 
+        System.out.println("--->read vblockNo="+vblockNo);
         byte[] v = new byte[b.getLen()];
         ByteBuffer dst = ByteBuffer.wrap(v);
         int len = 0;
@@ -175,16 +177,22 @@ public class PersistValue implements PersistConst
             v = new byte[b.getLen()];
             dst = ByteBuffer.wrap(v);
         }
-        for(Block old;b != null; )
+        for(Block curr = null;b != null; )
         {
-            if(dst != null)
-            {
-                readV(b, dst);
-            }
-            old = b;
-            b = b.getNext();
-            recycle(old, isHead);
-            isHead = false;
+        	try
+        	{
+	            if(dst != null)
+	            {
+	                readV(b, dst);
+	            }
+	            curr = b;
+	            b = b.getNext();
+        	}
+        	finally
+        	{
+        		recycle(curr, isHead);
+        		isHead = false;
+        	}
         }
         return v;
     }
@@ -246,12 +254,37 @@ public class PersistValue implements PersistConst
         {
             // 记下数据
             offset += writeV(b, v, offset);
-            if(offset >= v.length)
-                break;
         }
         firstb.setLen(v.length);
         headInUse.put(firstb.blockNo, firstb);
         return firstb;
+    }
+    
+    class PVItr extends BlockItr{
+    	
+    	 public PVItr()
+         {
+             super(buffer, maxBlockCnt, blockBytes);
+         }
+
+		@Override
+		public boolean hasNext() {
+			// TODO Auto-generated method stub
+			return false;
+		}
+
+		@Override
+		public byte[] next() {
+			// TODO Auto-generated method stub
+			return null;
+		}
+
+		@Override
+		public void remove() {
+			// TODO Auto-generated method stub
+			
+		}
+    	
     }
 
 }

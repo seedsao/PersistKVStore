@@ -9,7 +9,10 @@ import java.nio.channels.FileChannel.MapMode;
 import java.util.Iterator;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
+import org.apache.log4j.Logger;
+
 import seed.store.PersistKey.PKItr;
+import seed.store.PersistValue.PVItr;
 import seed.utils.P;
 import seed.utils.Utils;
 /**
@@ -21,6 +24,8 @@ import seed.utils.Utils;
  */
 public class PersistKVStore
 {
+	Logger log = Logger.getLogger("kvstore");
+	
     protected  static final int lsize = 97;
     private ReentrantReadWriteLock locker = new ReentrantReadWriteLock();
 //    protected  ReentrantReadWriteLock[] locker = new ReentrantReadWriteLock[lsize];
@@ -104,11 +109,11 @@ public class PersistKVStore
     public byte[] get(byte[] k)
     {
         int h = Utils.hash(k);
-        System.out.println("start_11");
+        System.out.println("start_11"+Utils.join(k, ","));
         P<Block, Integer> p = PK.getVNO(h, k);
         if(p == null)
             return null;
-        System.out.println("start_12");
+        System.out.println("start_12="+p);
         return PV.read(p.b);
     }
 
@@ -124,6 +129,22 @@ public class PersistKVStore
     public Iterator<byte[]> keyIterator()
     {
         return new KeyItrWrapper();
+    }
+    
+    public PKItr testPKItr(){
+    	return PK.new PKItr();
+    }
+    
+    public PVItr testPVItr(){
+    	return PV.new PVItr();
+    }
+    
+    public void print()
+    {
+    	log.info("----------store_start-----------");
+    	// base信息
+    	PK.print();
+    	log.info("----------store_end-----------");
     }
 
     /**

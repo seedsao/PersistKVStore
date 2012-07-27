@@ -3,6 +3,8 @@ package seed.store;
 import java.nio.ByteBuffer;
 import java.util.Iterator;
 
+import org.apache.log4j.Logger;
+
 public abstract class BlockItr  implements Iterator<byte[]> {
     private ByteBuffer _buffer;
     private int currBlockCnt ;
@@ -36,5 +38,20 @@ public abstract class BlockItr  implements Iterator<byte[]> {
             }
         }
         return null;
+    }
+    
+    public void print(Logger logger)
+    {
+    	int offset = 0;
+        ByteBuffer tmp;
+        for(int i=1;i<=maxBlockCnt;i++)
+        {
+            offset = (i-1) * blockBytes;
+            _buffer.position( offset );
+            _buffer.limit(offset+ blockBytes);
+            tmp = _buffer.slice();
+            Block b = new Block(i, tmp);
+            logger.info(b);
+        }
     }
 }

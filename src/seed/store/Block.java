@@ -34,9 +34,10 @@ public class Block
     public static final int POS_LEN = 4;
     public static final int POS_DATA = 8;
 
-    final int blockNo;
+    final int blockNo;	// 当前节点的no
     final ByteBuffer bb;
-    private Block next;
+    private Block next;	// 后续节点
+    private int preNo;	// 前置节点的no
 
     private Block(){
         blockNo = -1;
@@ -51,17 +52,14 @@ public class Block
 
     int getNextBNO()
     {
-//        return bb.getInt(POS_NO);
         return getNextBNO(bb);
     }
     int getLen()
     {
-//        return bb.getInt(POS_LEN) ;
         return getLen(bb);
     }
     void setLen(int v)
     {
-//        bb.putInt(POS_LEN, v);
         setLen(bb, v);
     }
     /**
@@ -71,37 +69,48 @@ public class Block
     void setNext(Block b)
     {
         setNextBNO(bb, b.blockNo);
-        linkNext(b);
+        join(b);
     }
     /**
-     * 仅仅设置next
+     * 设置当前节点的next,和b的preNo
+     * @warning : 此方法只在初始化block分析时用到
      * @param b
      */
-    void linkNext(Block b)
+    void join(Block b)
     {
         next = b;
+        if(b != null)
+        	b.preNo = blockNo;
     }
     Block getNext()
     {
         return next;
     }
+    int getPreNo()
+    {
+    	return preNo;
+    }
 
     void free()
     {
+    	next = null;
+    	preNo = 0;
         for(int i=0;i<getMetaSize();i++)
             bb.put(i, (byte)0);
+        
     }
     void markAsUsed()
     {
         bb.putInt(POS_NO, -1);
     }
-    /******************************************
-     *  下面涉及实际数据区的操作,由Key/Value自行定义
-     * *****************************************
+    
+    
+    //// -------下面涉及实际数据区的操作,由Key/Value自行定义
+    
+    /**
      * @param position
      * @param dst
      */
-
     int _readAt(int position, ByteBuffer dst)
     {
         int k = 0;
@@ -130,7 +139,7 @@ public class Block
         return length;
     }
 
-    ////------- 静态方法
+    //// ------- 静态方法
     static int getMetaSize()
     {
         return POS_DATA;
@@ -154,7 +163,7 @@ public class Block
 
     public String toString()
     {
-        return blockNo+"~"+bb;
+        return "Block[bno="+blockNo+",buffer="+bb+",nextbno="+getNextBNO()+",preNo="+getPreNo()+",len="+getLen()+"]";
     }
-    //
+    
 }

@@ -28,4 +28,9 @@ public class P<A, B>
     {
         return new P<A, B>(a, b);
     }
+    
+    public String toString()
+    {
+    	return "P["+a+","+b+"]";
+    }
 }
