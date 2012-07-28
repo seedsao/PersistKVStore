@@ -105,11 +105,12 @@ public class Utils
     
     public static String join(byte[] b, String separator)
     {
-        String s = "";
         if(b == null)
-        	return s;
+        	return "";
+        String s = "[";
         for (byte k : b)
             s += k + separator;
+        s += "]";
         return s;
     }
     

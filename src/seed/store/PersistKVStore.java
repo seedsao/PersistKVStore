@@ -95,6 +95,8 @@ public class PersistKVStore
         P<Block, Integer> p = PK.getVNO(h, k);
         if(p == null)
             p = P.join(PK.add(h, k), 0);
+        else
+        	System.out.println("conflict");
         if(p.a == null || p.a == Block.NOT_ENOUGH)
             return false;
         // 创建数据
@@ -102,6 +104,7 @@ public class PersistKVStore
         if(vb == null || vb==Block.NOT_ENOUGH)
             return false;
         // 回写索引
+        log.info("put(),write back vno to keyblock,k="+Utils.join(k, "|")+",v="+Utils.join(v, "|")+",vno="+vb.blockNo+",keyblock="+p.a+",");
         PK.writeVBNO(p.a, vb.blockNo);
         return true;
     }
@@ -109,11 +112,12 @@ public class PersistKVStore
     public byte[] get(byte[] k)
     {
         int h = Utils.hash(k);
-        System.out.println("start_11"+Utils.join(k, ","));
+//        System.out.println("start_11,k="+Utils.join(k, ","));
         P<Block, Integer> p = PK.getVNO(h, k);
         if(p == null)
             return null;
-        System.out.println("start_12="+p);
+//        System.out.println("start_12="+p);
+        System.out.println("---->find key~k="+Utils.join(k, ",")+":"+p);
         return PV.read(p.b);
     }
 
@@ -123,7 +127,14 @@ public class PersistKVStore
         P<Block, Integer> p = PK.getVNO(h, k);
         if(p == null)
             return null;
-        return PV.remove(p.b);
+        if(!PK.remove(h, k))
+        	return null;	
+        byte[] v = PV.remove(p.b);
+        if(v == null){
+        	log.error("remove(),k="+Utils.join(k, ",")+","+p+",key is remove,value not found");
+        	return null;
+        }
+        return v;
     }
 
     public Iterator<byte[]> keyIterator()
@@ -144,6 +155,7 @@ public class PersistKVStore
     	log.info("----------store_start-----------");
     	// base信息
     	PK.print();
+    	PV.print();
     	log.info("----------store_end-----------");
     }
 

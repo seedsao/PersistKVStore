@@ -68,8 +68,14 @@ public class Block
      */
     void setNext(Block b)
     {
-        setNextBNO(bb, b.blockNo);
-        join(b);
+    	if(b == null)
+    	{
+    		setNextBNO(bb, 0);
+    	} else
+    	{
+	        setNextBNO(bb, b.blockNo);
+	        join(b);
+    	}
     }
     /**
      * 设置当前节点的next,和b的preNo
@@ -101,7 +107,11 @@ public class Block
     }
     void markAsUsed()
     {
-        bb.putInt(POS_NO, -1);
+        setNextBNO(bb, -1);
+    }
+    boolean isMarkUsed()
+    {
+    	return getNextBNO() != 0; 
     }
     
     
@@ -163,7 +173,10 @@ public class Block
 
     public String toString()
     {
-        return "Block[bno="+blockNo+",buffer="+bb+",nextbno="+getNextBNO()+",preNo="+getPreNo()+",len="+getLen()+"]";
+        return "{class=Block,bno="+blockNo+",nextbno="+getNextBNO()+",preNo="+getPreNo()+",len="+getLen()+"}";
     }
     
+    public static class Holder {
+    	public Block block;
+    }
 }

@@ -4,8 +4,11 @@ import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.Map.Entry;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.logging.Logger;
+
+import org.apache.log4j.Logger;
 
 import seed.utils.P;
 import seed.utils.Utils;
@@ -101,9 +104,8 @@ public class PersistValue implements PersistConst
         P<Integer, Block> p = P.join(0, null);
         if(b==null)
             return p;
-        System.out.println("start_41");
+//        System.out.println("start_41");
         for(;b != null;b = b.getNext()) {
-            System.out.println("start_42");
             p.a ++;
             p.b = b;
         }
@@ -130,7 +132,7 @@ public class PersistValue implements PersistConst
         if(p.a == 0)
             return Block.emptyV;
 
-        System.out.println("--->read vblockNo="+vblockNo);
+        System.out.println("start read vblockNo="+vblockNo);
         byte[] v = new byte[b.getLen()];
         ByteBuffer dst = ByteBuffer.wrap(v);
         int len = 0;
@@ -141,6 +143,7 @@ public class PersistValue implements PersistConst
             if(len >= v.length)
                 break;
         }
+        System.out.println("end read vblockNo="+vblockNo);
         return v;
     }
 
@@ -181,11 +184,9 @@ public class PersistValue implements PersistConst
         {
         	try
         	{
+        		curr = b;
 	            if(dst != null)
-	            {
-	                readV(b, dst);
-	            }
-	            curr = b;
+	                readV(curr, dst);
 	            b = b.getNext();
         	}
         	finally
@@ -206,6 +207,40 @@ public class PersistValue implements PersistConst
     {
         _remove(vbno, false);
     }
+    
+    Block add(int vno, byte[] v)
+    {
+    	if(v == null || v.length == 0)
+            return null;
+        int n = calcBlockNeed(v.length);
+        if(vno > 0)
+        	remove2(vno);	// 有旧数据就先释放 -- add2不用这一步，再看看
+        if(n > poolInFree.size())
+        	return Block.NOT_ENOUGH;
+        // 存入一个key
+        Block b, fb = null;
+        int offset = 0;
+        for(int i=0;i<n;i++)
+        {
+            b = poolInFree.poll();
+            if(b == null)
+            {
+                // TODO 正常情况不会到达这,需要recycle分配出来的block
+                log.error("add(),vno="+vno+",v="+v.length+",no_space,need recycle!");
+                return Block.NOT_ENOUGH;
+            }
+            b.markAsUsed();	// 先标记使用中
+            if(fb==null)
+            	fb = b;	// 记住first
+            offset += writeV(b, v, offset);
+            if(offset >= v.length)
+                break;
+        }
+        //
+        fb.setLen(v.length);
+        headInUse.put(fb.blockNo, fb);
+        return fb;
+    }
 
     /**
      * 注意v==null 或v=[]时,是返回失败, 因为这两个情况,不需要申请vblock
@@ -213,7 +248,7 @@ public class PersistValue implements PersistConst
      * @param v
      * @return
      */
-    Block add(int vbno, byte[] v)
+    Block add2(int vbno, byte[] v)
     {
         if(v == null || v.length == 0)
             return null;
@@ -235,6 +270,7 @@ public class PersistValue implements PersistConst
                     t = poolInFree.poll();
                     if(t == null)
                         return Block.NOT_ENOUGH;
+                    t.markAsUsed();	// 先标记使用中
                     if(firstb == null)   {// 完全是新申请的,作为第一个块
                         info.b = firstb = t;
                     } else {
@@ -258,6 +294,22 @@ public class PersistValue implements PersistConst
         firstb.setLen(v.length);
         headInUse.put(firstb.blockNo, firstb);
         return firstb;
+    }
+    
+    public void print()
+    {
+    	log.info("---------------------PV(headInUseStart)------------------");
+    	for(Entry<Integer, Block> e: new TreeMap<Integer, Block>(headInUse).entrySet())
+    	{
+    		Block b = e.getValue();
+    		for(;b != null;)
+    		{
+    			log.info(b.toString());
+    			b = b.getNext();
+    		}
+    		log.info("*******");
+    	}
+    	log.info("---------------------PV(headInUseEnd)------------------");
     }
     
     class PVItr extends BlockItr{

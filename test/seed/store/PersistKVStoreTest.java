@@ -3,10 +3,10 @@ package seed.store;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Random;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.log4j.Logger;
 import org.apache.log4j.PropertyConfigurator;
@@ -19,15 +19,18 @@ public class PersistKVStoreTest
     static PersistKVStore store;
     static int ksize = 5;
     static int vsize = 3;
-    static int fsize = 1000;
+    static int fsize = 10000;
     static Random R = new Random();
     static
     {
-        PropertyConfigurator.configure("conf/log4j.properties");
+    	//
+    	new File("d:/tester.log").delete();
+    	new File("d:/t.idx").delete();
+    	new File("d:/t.dat").delete();
+    	//
+    	PropertyConfigurator.configure("conf/log4j.properties");
         log = Logger.getLogger("tester");
-        //
-        new File("d:/t.idx").delete();
-        new File("d:/t.dat").delete();
+        log.info("aaaa");
         try
         {
             store = new PersistKVStore("d:/", "t", ksize, vsize, fsize);
@@ -45,7 +48,7 @@ public class PersistKVStoreTest
         singleTest();
         collisionTest();
         multiTest();
-    	
+//    	
     	store.print();
     }
 
@@ -88,10 +91,10 @@ public class PersistKVStoreTest
     }
 
     // -- 多数据量测试(碰撞/与正常)
-    static Map<byte[], byte[]> map = new HashMap<byte[], byte[]>();
+    static ConcurrentHashMap<byte[], byte[]> map = new ConcurrentHashMap<byte[], byte[]>();
     static void multiTest()
     {
-        for (int i = 0; i < fsize /10; i++)
+        for (int i = 0; i < fsize /3; i++)
         {
             byte[] k = new byte[R.nextInt(1*ksize - 1) + 1];
                 R.nextBytes(k);
@@ -104,7 +107,7 @@ public class PersistKVStoreTest
                 if (store.put(k, v))
                 {
                     System.out.print("b-");
-                    map.put(k, v);
+                    putTo(map, k, v);
                     System.out.print("c-");
                     newV = store.get(k);
                     System.out.print("d-");
@@ -125,40 +128,25 @@ public class PersistKVStoreTest
                 // 随机测试一个
                 if(map.size() > 0)
                 {
-                    List<byte[]> keyList = new ArrayList<byte[]>(map.keySet());
-                    byte[] rk = keyList.get(R.nextInt(keyList.size()));
-                    System.out.print("g-");
-                    map.remove(rk);
-                    store.remove(rk);
-                    System.out.print("h-");
+                	if(R.nextBoolean())
+                	{
+	                    List<byte[]> keyList = new ArrayList<byte[]>(map.keySet());
+	                    byte[] rk = keyList.get(R.nextInt(keyList.size()));
+	                    System.out.print("g-");
+	                    byte[] v11 = map.remove(rk);
+	                    System.out.print("g1-");
+	                    byte[] v22 = store.remove(rk);
+	                    System.out.print("g2-");
+	                    if(!Utils.isEquals(v11, v22))
+	                    {
+	                    	System.out.println("remove and compare failed!!!v11="+Utils.join(v11, ",")+",v22="+Utils.join(v22, ","));
+	                    	break;
+	                    }
+	                    System.out.print("h-");
+                	}
                 }
-                
-                
-                if(map.size() > 0)
-                {    
-                	List<byte[]> keyList = new ArrayList<byte[]>(map.keySet());
-                    byte[] rk = keyList.get(R.nextInt(keyList.size()));
-                    System.out.print("i-");
-                    newV = store.get(rk);
-                    v = map.get(rk);
-                    if (Utils.isEquals(v, newV) == false)
-                    {
-                    	store.get(rk);
-                    	BlockItr itr = (BlockItr)store.testPKItr();
-                    	log.info("---------PK---------------");
-                    	itr.print(log);
-                    	
-                    	log.info("---------PV---------------");
-                    	itr = (BlockItr)store.testPVItr();
-                    	itr.print(log);
-                        System.out.println("|fail1|k=" + Utils.join(k, ",") + "|v=" + Utils.join(v, ",") + "|newv="+newV);
-                        log.error("|fail1|k=" + Utils.join(k, ",") + "|v=" + Utils.join(v, ",") + "|newV="+newV);
-                        break;
-                    }
-                    System.out.print("j-");
-                }
-
-//
+                if(!match())
+                	break;
 //                List<byte[]> keyList = new ArrayList<byte[]>();
 //                Iterator<byte[]> itr = store.keyIterator();
 //                i = 0;
@@ -200,7 +188,36 @@ public class PersistKVStoreTest
             }
             System.out.println("i="+i +"|succ|k="+k.length+",v="+v.length+"|"+",k=" + Utils.join(k, ",") + "|v=" + Utils.join(v, ",") + "|succ");
             //log.info("i="+i +"|succ|k="+k.length+",v="+v.length+"|"+",k=" + Utils.join(k, ",") + "|v=" + Utils.join(v, ",") + "|succ");
+            System.out.println();
         }
+    }
+    
+    private static void putTo(ConcurrentHashMap<byte[], byte[]> map, byte[] key, byte[] value)
+    {
+    	for(byte[] k : map.keySet())
+    	{
+    		if(Utils.isEquals(k, key))
+    		{
+    			map.remove(k);
+    		}
+    	}
+    	map.put(key, value);
+    }
+    
+    private static boolean match()
+    {
+    	for(Entry<byte[], byte[]> e : map.entrySet())
+    	{
+    		byte[] v2 = store.get(e.getKey());
+    		byte[] v = e.getValue();
+    		if(!Utils.isEquals(v, v2))
+    		{
+    			v2 = store.get(e.getKey());
+    			System.out.println("--->not match");
+    			return false;
+    		}
+    	}
+    	return true;
     }
     
 }
