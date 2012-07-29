@@ -11,9 +11,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.apache.log4j.Logger;
 
-import seed.store.PersistKey.PKItr;
-import seed.store.PersistValue.PVItr;
-import seed.utils.P;
+import seed.store.Block.Holder;
 import seed.utils.Utils;
 /**
  * a persist key-value store basis of mmap
@@ -26,8 +24,7 @@ public class PersistKVStore
 {
 	Logger log = Logger.getLogger("kvstore");
 	
-    protected  static final int lsize = 97;
-    private ReentrantReadWriteLock locker = new ReentrantReadWriteLock();
+    protected ReentrantReadWriteLock locker = new ReentrantReadWriteLock();
 //    protected  ReentrantReadWriteLock[] locker = new ReentrantReadWriteLock[lsize];
 //    ReentrantReadWriteLock getLocker(int hash)
 //    {
@@ -73,8 +70,9 @@ public class PersistKVStore
     public boolean putIfAbsent(byte[] k, byte[] v)
     {
         int h = Utils.hash(k);
-        P<Block, Integer> p = PK.getVNO(h, k);
-        if (p != null)
+        Holder hdHolder = new Holder();
+        int vno = PK.getVNO(h, k, hdHolder);
+        if (vno > 0)	// 存在此key则不能put
             return false;
         // 创建一个key
         Block kb = PK.add(h, k);
@@ -92,46 +90,52 @@ public class PersistKVStore
     public boolean put(byte[] k, byte[] v)
     {
         int h = Utils.hash(k);
-        P<Block, Integer> p = PK.getVNO(h, k);
-        if(p == null)
-            p = P.join(PK.add(h, k), 0);
+        Holder hdHolder = new Holder();
+        int vno = PK.getVNO(h, k, hdHolder);
+        if(vno <= 0)
+        {
+        	hdHolder.block = PK.add(h, k);
+        }
         else
-        	System.out.println("conflict");
-        if(p.a == null || p.a == Block.NOT_ENOUGH)
+        {
+//        	System.out.println("conflict");
+        }
+        if(hdHolder.block == null || hdHolder.block == Block.NOT_ENOUGH)
             return false;
         // 创建数据
-        Block vb = PV.add(p.b, v);
+        Block vb = PV.add(vno, v);
         if(vb == null || vb==Block.NOT_ENOUGH)
             return false;
         // 回写索引
-        log.info("put(),write back vno to keyblock,k="+Utils.join(k, "|")+",v="+Utils.join(v, "|")+",vno="+vb.blockNo+",keyblock="+p.a+",");
-        PK.writeVBNO(p.a, vb.blockNo);
+        log.info("put(),write vno backto keyblock,k="+Utils.join(k, "|")+",v="+Utils.join(v, "|")+"" +
+        		",vno="+vb.blockNo+",keyblock="+hdHolder.block+",");
+        PK.writeVBNO(hdHolder.block, vb.blockNo);
         return true;
     }
 
     public byte[] get(byte[] k)
     {
         int h = Utils.hash(k);
-//        System.out.println("start_11,k="+Utils.join(k, ","));
-        P<Block, Integer> p = PK.getVNO(h, k);
-        if(p == null)
-            return null;
-//        System.out.println("start_12="+p);
-        System.out.println("---->find key~k="+Utils.join(k, ",")+":"+p);
-        return PV.read(p.b);
+        Holder hdHolder = new Holder();
+        int vno = PK.getVNO(h, k, hdHolder);
+        if(vno <= 0)
+        	return null;
+//        System.out.println("---->find key,k="+Utils.join(k, ",")+",vno="+vno+",keyHd="+hdHolder.block);
+        return PV.read(vno);
     }
 
     public byte[] remove(byte[] k)
     {
         int h = Utils.hash(k);
-        P<Block, Integer> p = PK.getVNO(h, k);
-        if(p == null)
-            return null;
+        Holder hdHolder = new Holder();
+        int vno = PK.getVNO(h, k, hdHolder);
+        if(vno <= 0)
+        	return null;
         if(!PK.remove(h, k))
         	return null;	
-        byte[] v = PV.remove(p.b);
+        byte[] v = PV.remove(vno);
         if(v == null){
-        	log.error("remove(),k="+Utils.join(k, ",")+","+p+",key is remove,value not found");
+        	log.error("remove(),k="+Utils.join(k, ",")+",keyHd="+hdHolder.block+",vno="+vno+",key is remove,but value not found");
         	return null;
         }
         return v;
@@ -139,16 +143,10 @@ public class PersistKVStore
 
     public Iterator<byte[]> keyIterator()
     {
-        return new KeyItrWrapper();
+        return PK.new FastPKItr();
     }
     
-    public PKItr testPKItr(){
-    	return PK.new PKItr();
-    }
-    
-    public PVItr testPVItr(){
-    	return PV.new PVItr();
-    }
+    /*********************下面接口用于测试***********************/
     
     public void print()
     {
@@ -159,46 +157,39 @@ public class PersistKVStore
     	log.info("----------store_end-----------");
     }
 
-    /**
-     * key上的迭代器
-     * @author seedshao
-     *
-     */
-    class KeyItrWrapper implements Iterator<byte[]>{
-
-        PKItr pkItr = PK.new PKItr();
-
-        public boolean hasNext() {
-            locker.readLock().lock();
-            try
-            {
-                return pkItr.hasNext();
-            } finally
-            {
-                locker.readLock().unlock();
-            }
-        }
-
-        public byte[] next() {
-            locker.readLock().lock();
-            try
-            {
-                return pkItr.next();
-            } finally
-            {
-                locker.readLock().unlock();
-            }
-        }
-
-        public void remove() {
-            locker.writeLock().lock();
-            try
-            {
-                pkItr.remove();
-            } finally
-            {
-                locker.writeLock().unlock();
-            }
-        }
-    }
+//    /**
+//     * key上的迭代器
+//     * @author seedshao
+//     *
+//     */
+//    class KeyItrWrapper implements Iterator<byte[]>{
+//
+//        FastPKItr pkItr = PK.new FastPKItr();
+//
+//        public boolean hasNext() {
+//        	
+//        }
+//
+//        public byte[] next() {
+//            locker.readLock().lock();
+//            try
+//            {
+//                return pkItr.next();
+//            } finally
+//            {
+//                locker.readLock().unlock();
+//            }
+//        }
+//
+//        public void remove() {
+//            locker.writeLock().lock();
+//            try
+//            {
+//                pkItr.remove();
+//            } finally
+//            {
+//                locker.writeLock().unlock();
+//            }
+//        }
+//    }
 }

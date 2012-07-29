@@ -2,12 +2,12 @@ package seed.store;
 
 import java.nio.ByteBuffer;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.Map;
-import java.util.TreeMap;
 import java.util.Map.Entry;
-
-import javax.management.RuntimeErrorException;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.log4j.Logger;
 
@@ -23,20 +23,31 @@ import seed.utils.Utils;
 public class PersistKey implements PersistConst
 {
     Logger log = Logger.getLogger("kvstore");
-//    private static final ReentrantReadWriteLock locker = new ReentrantReadWriteLock();
-    LinkedList<Block> poolInFree = new LinkedList<Block>();
-    Map<Integer, Block> poolHash = new HashMap<Integer, Block>();
-//    Map<Integer, Block> poolInUse = new HashMap<Integer, Block>();
+    /*
+     * 空闲池
+     */
+    private final LinkedList<Block> poolFree = new LinkedList<Block>();
+    /*
+     * hash链map,一条链上会有多个key.
+     * 新增加key时，采用头插法，放在最前面
+     * 条目为(hash, block)
+     */
+    private final Map<Integer, Block> poolHash = new HashMap<Integer, Block>();
+    /*
+     * 专门用于key的遍历
+     * 条目为(bno, block)
+     */
+    private final ConcurrentHashMap<Integer, Block> poolKey = new ConcurrentHashMap<Integer, Block>(); 
 
     /**
      * blockBytes = metaBytes + keyBytes
      */
     private final int blockBytes ;    // byteSize
-    private final int keyBytes ;
+    private final int keyBytes ;		// 有效key的大小
     private final int maxBlockCnt ;    // 最大block数
     private final ByteBuffer buffer;    // 存储区
 
-    private static final int LEN_VNO = 4;
+    private static final int LEN_VNO = 4;	// VNO（数据block指针大小，int)
 
     private static final int POS_DATA_START = Block.getMetaSize();
     private static final int POS_DATA_VBNO = POS_DATA_START;                                    // bno的偏移
@@ -112,7 +123,7 @@ public class PersistKey implements PersistConst
             if(block.getNextBNO() != 0)    // 被占用了
                 poolInUse.put(block.blockNo, block);
             else
-                poolInFree.add(block);
+                poolFree.add(block);
         }
         // -- 分析并链起来
         for(Block _b : poolInUse.values())
@@ -153,7 +164,7 @@ public class PersistKey implements PersistConst
         if(b == null)
             return ;
         b.free();
-        poolInFree.offer(b);
+        poolFree.offer(b);
     }
     
     /*
@@ -165,13 +176,12 @@ public class PersistKey implements PersistConst
     	if(klen <= 0)
     		return null;
     	// read into buffer
-    	ByteBuffer kbb = ByteBuffer.wrap(new byte[klen + LEN_VNO]);
-    	readAhead(head, kbb, new Holder());
-    	kbb.position(LEN_VNO);
+    	byte[] src = new byte[klen + LEN_VNO];
+    	ByteBuffer kbb = ByteBuffer.wrap(src);
+    	readAhead(head, kbb, null);
     	// read key
     	byte[] key = new byte[klen];
-    	for(int i=0;i<key.length;i++)
-    		key[i] = kbb.get();
+    	System.arraycopy(src, LEN_VNO, key, 0, klen);
     	return key;
     }
     /*
@@ -183,15 +193,15 @@ public class PersistKey implements PersistConst
     	if(klen <= 0)
     		return null;
     	// read into buffer
-    	ByteBuffer kbb = ByteBuffer.wrap(new byte[klen + LEN_VNO]);
-        readAhead(head, kbb, new Holder());
+    	byte[] src = new byte[klen + LEN_VNO];
+    	ByteBuffer kbb = ByteBuffer.wrap(src);
+        readAhead(head, kbb, null);
         kbb.position(0);
         // read vno
         int vno = kbb.getInt(0);
         // read key
-        byte[] key = new byte[klen];
-        for(int i=0;i<key.length;i++)
-    		key[i] = kbb.get();
+    	byte[] key = new byte[klen];
+    	System.arraycopy(src, LEN_VNO, key, 0, klen);
         
         return P.join(key, vno);
     }
@@ -199,10 +209,10 @@ public class PersistKey implements PersistConst
      * 从head处开始一直读完此key,返回下一个key,null表明此无更多key了
      * @param head	: 必须是(klen>0的)头块
      * @param kbb	: key将读到此kbb中
-     * @param tail 	: 此key的尾节点
+     * @param tailHd 	: 此key的尾节点,注意当key只占用一个block时，tailHd也指向head
      * @return	：返回此冲突链上下一个key, null表明无更多key了
      */
-    private Block readAhead(Block head, ByteBuffer kbb, Holder tail)
+    private void readAhead(Block head, ByteBuffer kbb, Holder tailHd)
     {
         int klen = head.getLen();
         Utils.assertTrue(klen>0, "readAhead(),head="+head+",klen="+klen+"<=0");
@@ -220,87 +230,57 @@ public class PersistKey implements PersistConst
         for(;i<klen && b!=null;)
         {
             if(head !=b && b.getLen() > 0)    // 不能是第一个,第一个肯定>0
-                return b;   // 可以直接跳到下一下,因为i<klen && b!=null
-//                log.error("hash:"+hash+",block="+firstb+",is_head");
+                return ;   // 可以直接跳到下一下,因为i<klen && b!=null
             i += readAll(b, kbb);
-            tail.block = b;
+            if(tailHd != null)
+            	tailHd.block = b;	// 不为null，则记录
             b = b.getNext();
         }
+        if(b != null && b.getLen()==0)
+        {
+        	log.error("readAhead(),err occur! maybe not recycle rightly,head="+head+",tail="+tailHd+",nextHead="+b);
+        }
         // 继续读下一个key
-        return b;
     }
 
     /**
      * 取key的blockNo,如果-1则说明没此key
      * @param hash
      * @param key
+     * @param hdHolder
      * @return
      */
-    protected P<Block, Integer> getVNO(int hash, byte[] key)
+    int getVNO(int hash, byte[] key, Holder hdHolder)
     {
-        Block b = poolHash.get(hash);
-        if(b == null)
-            return null;
+        Block head = poolHash.get(hash);
+        if(head == null)
+            return -1;
         
         ByteBuffer kbb = ByteBuffer.wrap(new byte[LEN_VNO+key.length]); // 读key的buffer -- 只读与目标key相同的那些key
-        /*
-         *  klen : 当前key占用字节数
-         */
-        Block head;
-//        System.out.println("start_21");
-        for(int klen = 0 ;b != null;) // 下一个block不存在,可以结束了
+        for(int klen = 0 ;head != null;) // 下一个block不存在,可以结束了
         {
-            klen = b.getLen();
+        	// klen : 当前key占用字节数
+            klen = head.getLen();
             /*
              * 1.不是key的第一个block,跳过此block
              * 2.如果实际需要字节数与此key的占用数不=,那么肯定不相等了,直接跳过
              */
-//            System.out.println("start_22");
             if(klen <= 0 || key.length != klen) {
-                b = b.getNext();
+                head = head.getNext();
                 continue;
             }
-//            System.out.println("start_23");
             // head是当前key的第一个结点
-            head = b;
-            b = readAhead(head, kbb, new Holder());
-//            System.out.println("start_24");
-            /*
-           * 1.与目标key比较
-           * 2.b已经是当前key的后继block
-           */
+           readAhead(head, kbb, hdHolder);
+           // 与目标key比较
             if(Utils.isEquals(kbb.array(), LEN_VNO, key))
-                return P.join(head, kbb.getInt(0));
-
-//            // 到这来一定保证klen>0即当前b为key的头块
-//            klen += LEN_VNO;  // 我们要多读4字节(LEN_VNO)出来
-//            /*
-//             *  开始读一个key到kbb
-//             *  1.读到klen长度停止
-//             *  2.或读到碰到一个新的key头b.getLen()>0
-//             *  3.或读到next终止
-//             */
-//            kbb.clear();
-//            int i=0;
-//            Block firstb = b;
-//            for(;i<klen && b!=null;)
-//            {
-//                if(firstb !=b && b.getLen() > 0)    // 不能是第一个,第一个肯定>0
-//                    continue outter;   // 可以直接跳到下一下,因为i<klen && b!=null
-////                    log.error("hash:"+hash+",block="+firstb+",is_head");
-//                i += readAll(b, kbb);
-//                b = b.getNext();
-//            }
-//            /*
-//             * 1.与目标key比较, 刚好有读完klen过才比较,不然肯定不会相等的
-//             * 2.b已经是当前key的后继block
-//             * 3.firstb是当前key的第一个结点
-//             */
-//            if(i==klen && Utils.isEquals(kbb.array(), LEN_VNO, key))
-//                return P.join(firstb, kbb.getInt(0));
-//            // 继续读下一个key
+            {
+            	hdHolder.block = head;
+            	return kbb.getInt(0);
+            }
+            // 可以继续查下一个head了
+            head = hdHolder.block==null ? null : hdHolder.block.getNext();
         }
-        return null;
+        return -1;
     }
 
     Block add(int hash, byte[] key)
@@ -311,19 +291,19 @@ public class PersistKey implements PersistConst
             log.warn("add(),hash="+hash+",keyLen="+key.length+",key_to_long_than_"+Short.MAX_VALUE);
             return Block.NOT_ENOUGH;
         }
-        if(blockNeed > poolInFree.size())
+        if(blockNeed > poolFree.size())
         {
             log.warn("add(),hash="+hash+",keyLen="+key.length+",no_space");
             return Block.NOT_ENOUGH;
         }
-        log.info("<<<<<<use block");
-        log.info("<<<<<<write "+Utils.join(key, ","));
-        Block b= null, p = null, firstp = null;
+        log.info("use start>>>>>");
+        log.info(">>>write "+Utils.join(key, "|"));
+        Block b= null, tail = null, hd = null;
         int offset = 0;
         // 存入一个key
         for(int i=0;i<blockNeed;i++)
         {
-            b = poolInFree.poll();
+            b = poolFree.poll();
             if(b == null)
             {
                 // TODO 正常情况不会到达这,需要recycle分配出来的block
@@ -331,142 +311,123 @@ public class PersistKey implements PersistConst
                 return Block.NOT_ENOUGH;
             }
             b.markAsUsed();	// 先标记使用中
-            if(p == null)
+            if(tail == null)
             {
-            	log.info("<<"+b+"~offset:"+offset);
                 offset += writeKatFirstBlock(b, key, offset);
-                firstp = b;
+                log.info(">>>"+b+",offset:"+offset);
+                hd = b;
             } else
             {
-            	log.info("<<"+b+"~offset:"+offset+"~pre:"+p);
                 offset += writeKatAfterBlock(b, key, offset);
-                p.setNext(b);
+                log.info(">>>"+b+",offset:"+offset+",pre:"+tail);
+                tail.setNext(b);
             }
-            p = b;
+            tail = b;
             if(offset >= key.length)
                 break;
         }
         /*
-         * p : 此key占用block链上最后一个block
-         * firstp : 此key占用block链上第一个block
+         * tail : 此key占用block链上最后一个block
+         * hd : 此key占用block链上第一个block
          */
-        firstp.setLen(key.length);
+        hd.setLen(key.length);
         b = poolHash.get(hash);
         //把自己放最前面
         if(b != null)
-            p.setNext(b);
+        {
+        	tail.setNext(b);
+        	 log.info("add(),insert current key to head,hd="+hd+",tail="+tail+",old="+b);
+        }
         //放入hash索引表
-        poolHash.put(hash, firstp);
-        log.info("<<<<use end");
-        return firstp;
+        poolHash.put(hash, hd);
+        poolKey.put(hd.blockNo, hd);
+        log.info(">>>>>use end");
+        return hd;
     }
 
     boolean remove(int hash, byte[] key)
     {
-        Block b = poolHash.get(hash);
-        if(b == null)
+        Block hd = poolHash.get(hash);
+        if(hd == null)
             return false;
         /*
          * klen : 当前key占用字节数
          * p : 每个key的整个block链接的前继结点,用于删除
          * kbb : 读key的buffer,只读与目标key相同的那些key
+         * preHd : 指向hd的前继block
+         * nextHd : 指向后继key的头block(注意与后继block的区别,后继key是以key为单位的，每个key有多个链起来的block组成)
          */
         ByteBuffer kbb = ByteBuffer.wrap(new byte[LEN_VNO+key.length]);
-        Block pre = null, head;
-        Holder preHolder = new Holder();	// 用于记录head的前一个节点
-        for(int klen = 0 ;b != null;) // 下一个block不存在,可以结束了
+        Block preHd = null, nextHd = null;
+        Holder tailHd = new Holder();	// 用于记录head的前一个节点
+        for(int klen = 0 ;hd != null;) // 下一个block不存在,可以结束了
         {
-//            klen = b.getLen();
-//            /*
-//             * 1.不是key的第一个block,跳过此block
-//             * 2.如果实际需要字节数与此key的占用数不=,那么肯定不相等了,直接跳过
-//             */
-//            if(klen <= 0 || key.length != klen)
-//                continue;
-//            // p只在这里赋值,因为只用记住当前key的父结点
-//            p = b;
-//            klen += LEN_VNO;  // 我们要多读4字节(LEN_VNO)出来
-//            /*
-//             *  开始读一个key进kbb
-//             *  1.读到klen长度停止
-//             *  2.或读到碰到一个新的key头b.getLen()>0
-//             *  3.或读到next终止
-//             */
-//            kbb.clear();
-//            int i=0;
-//            Block firstb = b;
-//            for(;i<klen;)
-//            {
-//                i += readAll(b, kbb);   // 从当前b(头块)开始读
-//                p = b;
-//                b = b.getNext();
-//                if(b == null)
-//                {
-//                    log.error("hash:"+hash+",block="+firstb+"not_exist");
-//                    return false;
-//                }
-//                if(b.getLen() > 0)
-//                {
-//                    log.error("hash:"+hash+",block="+firstb+",is_head");
-//                    break;
-//                }
-//            }
-        	
-            klen = b.getLen();
+            klen = hd.getLen();
             /*
              * 1.不是key的第一个block,跳过此block
              * 2.如果实际需要字节数与此key的占用数不=,那么肯定不相等了,直接跳过
              */
-//            System.out.println("start_22");
             if(klen <= 0 || key.length != klen) {
-            	pre = b;
-                b = b.getNext();
+            	preHd = hd;			// 始终记录前继block，用于删除
+                hd = hd.getNext();	// 此时，只能一个block一个block来搜索到下一个头节点
                 continue;
             }
-//            System.out.println("start_23");
-            // head是当前key的第一个结点
-            head = b;
-            pre = preHolder.block;	// 此head的前继节点
-            b = readAhead(head, kbb, preHolder);	// 经过此步后，preHolder记录的是b的前缀，head这个key的最后一个节点
-
+            // 到之为止，preHd是hd的前继block
+            readAhead(hd, kbb, tailHd);	// 经过此步后，tailHd记录的是head这个key的最后一个节点
+            nextHd = tailHd.block == null ? null : tailHd.block.getNext();
+            log.info("remove(),search,head="+hd+",tail="+tailHd.block+",nextHead="+nextHd);
             /*
              * 1.与目标key比较
-             * 2.b已经是当前key的后继block
-             * 3.firstb是当前key的第一个结点
+             * 2.nextHead已经是当前key的后继key的头节点(注意与后继block的区别,后继key是以key为单位的，每个key有多个链起来的block组成)
+             * 3.head是当前key的第一个结点
              */
             if(Utils.isEquals(kbb.array(), LEN_VNO, key))
             { // 执行删除
-                if(pre == null){  // 当前key为hash链上第一个key
-                    if(b != null) 
+            	// 1.如果此key为hash链上第一个，则更新hash表，否则从链上移除
+                if(preHd == null){  // 当前head的前继节点preHead=null，说明当前key为hash链上第一个key
+                    if(nextHd != null) 
                     {
                     	// 将后继key设置到hash查找表中
-                    	poolHash.put(hash, b);	// hash已经被替换成新的了，后面不能再删除了
+                    	if(nextHd.getLen() == 0)
+                		{
+                    		// xxx error occur -- 这个情况下，放进去对于使用是安全的，但可能有block没正确回收
+                		}
+                    	poolHash.put(hash, nextHd);	// hash已经被替换成新的了，后面不能再删除了
                     } else
                     {
                     	poolHash.remove(hash);	// 当前key为hash链上第一个key,时，需要删除hash
                     }
                 } else {
-                    pre.setNext(b);   //将后继给链上去
+                    preHd.setNext(nextHd);   //将后继给链上去
+                    log.info("remove(),link nextHead to preHead,preHead="+preHd+",nextHead="+nextHd);
                 }
-                // 当前key的尾节点断开
-                pre = preHolder.block;
-                if(pre != null)
-                	pre.free();
-                // 释放当前的key
-                log.info("free block>>>>");
-                for(b=head;b != null;b=b.getNext())
+                // 2.从poolKey中删除
+                poolKey.remove(hd.blockNo);
+                // 当前key的尾节点从block链上断开,不然循环起来释放把有效数据给干掉了
+                if(tailHd.block != null)
+                	tailHd.block.free();
+                // 3.释放当前的key,从当前head节点block开始释放此key的block链
+                log.info("remove(),recycle start<<<<<");
+                for(;hd != null;)
                 {
-                	log.info(">>"+b);
-                	recycle(b);
+                	log.info("<<<"+hd);
+                	preHd = hd;	
+                	hd = hd.getNext();
+                	recycle(preHd);	// 必须先记住释放的点，然后指针移一位，不能直接释放b,不然释放当前点，把路径切断了...
                 }
-                log.info("free end>>>>");
+                log.info("recycle end<<<<<");
                 return true;
             }
             // 继续读下一个key
+            preHd = tailHd.block;	// preHd还得是tailHd
+            hd = nextHd;			// hd设置为nextHd
         }
         return false;
     }
-
+    
+    /**
+     * 打印当前poolHash中的key
+     */
     public void print()
     {
     	log.info("---------------------PK(poolHashStart)------------------");
@@ -486,11 +447,11 @@ public class PersistKey implements PersistConst
     }
     
     /**
-     * 迭代器
+     * 迭代器,对mmap的block进行全遍历，不建议使用了
      * @author seed2
      *
      */
-    class PKItr extends BlockItr
+    @Deprecated class PKItr extends BlockItr
     {
         public PKItr()
         {
@@ -515,6 +476,42 @@ public class PersistKey implements PersistConst
             // TODO Auto-generated method stub
         }
 
+    }
+    
+    /**
+     * fast版本，因为依靠专门的poolKey来完成遍历，减少全遍历中无谓的查找
+     * @author seed2
+     *
+     */
+    class FastPKItr implements Iterator<byte[]>
+    {
+    	private final Iterator<Block> poolKeyItr ;	// 依靠poolKey上的iterator来完成迭代
+    	public FastPKItr()
+    	{
+    		poolKeyItr = poolKey.values().iterator();
+    	}
+
+		@Override
+		public boolean hasNext() {
+			return poolKeyItr.hasNext();
+		}
+
+		@Override
+		public byte[] next() {
+			Block hd = poolKeyItr.next();
+			if(hd == null)
+				return null;
+			int klen = hd.getLen();
+			if(klen <= 0)
+				poolKeyItr.remove();	// 移除掉吧，反正留着也没用
+			return readCurrentKey(hd);			
+		}
+
+		@Override
+		public void remove() {
+			poolKeyItr.remove();
+		}
+    	
     }
 
 }

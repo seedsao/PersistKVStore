@@ -132,18 +132,18 @@ public class PersistValue implements PersistConst
         if(p.a == 0)
             return Block.emptyV;
 
-        System.out.println("start read vblockNo="+vblockNo);
+//        System.out.println("start read vblockNo="+vblockNo);
         byte[] v = new byte[b.getLen()];
         ByteBuffer dst = ByteBuffer.wrap(v);
         int len = 0;
         for(;b != null; b=b.getNext())
         {
-            System.out.println(b);
+//            System.out.println(b);
             len += readV(b, dst);
             if(len >= v.length)
                 break;
         }
-        System.out.println("end read vblockNo="+vblockNo);
+//        System.out.println("end read vblockNo="+vblockNo);
         return v;
     }
 
@@ -208,6 +208,12 @@ public class PersistValue implements PersistConst
         _remove(vbno, false);
     }
     
+    /**
+     * 如果vno>0则先回收旧数据，再申请新block
+     * @param vno
+     * @param v
+     * @return
+     */
     Block add(int vno, byte[] v)
     {
     	if(v == null || v.length == 0)
@@ -218,7 +224,7 @@ public class PersistValue implements PersistConst
         if(n > poolInFree.size())
         	return Block.NOT_ENOUGH;
         // 存入一个key
-        Block b, fb = null;
+        Block b, fb = null, pre=null;
         int offset = 0;
         for(int i=0;i<n;i++)
         {
@@ -230,9 +236,13 @@ public class PersistValue implements PersistConst
                 return Block.NOT_ENOUGH;
             }
             b.markAsUsed();	// 先标记使用中
-            if(fb==null)
-            	fb = b;	// 记住first
             offset += writeV(b, v, offset);
+            // -- 处理链接
+            if(fb==null)
+            	fb = b;	// 记住第一个block
+            if(pre != null)	// 非第一个block,则挂到前面
+            	pre.setNext(b);
+            pre = b;
             if(offset >= v.length)
                 break;
         }

@@ -77,13 +77,13 @@ public class Utils
             h = h * 37 + b;
         return h;
         
-        // for collision test
-        // return collisionHash(v);
+//         for collision test
+//         return collisionHash(v);
     }
     
-    private static int collisionHash(byte[] v)
+    static int collisionHash(byte[] v)
     {
-        return 1;
+    	return 1;
     }
     
     /**

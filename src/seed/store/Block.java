@@ -71,6 +71,7 @@ public class Block
     	if(b == null)
     	{
     		setNextBNO(bb, 0);
+    		join(null);
     	} else
     	{
 	        setNextBNO(bb, b.blockNo);
@@ -173,10 +174,13 @@ public class Block
 
     public String toString()
     {
-        return "{class=Block,bno="+blockNo+",nextbno="+getNextBNO()+",preNo="+getPreNo()+",len="+getLen()+"}";
+        return "{class=Block,bno="+blockNo+",nextbno="+getNextBNO()+",preNo="+getPreNo()+",len="+getLen()+",next="+next+"}";
     }
     
     public static class Holder {
     	public Block block;
+    	public String toString(){
+    		return block.toString();
+    	}
     }
 }

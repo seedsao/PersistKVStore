@@ -3,6 +3,7 @@ package seed.store;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Random;
@@ -19,7 +20,7 @@ public class PersistKVStoreTest
     static PersistKVStore store;
     static int ksize = 5;
     static int vsize = 3;
-    static int fsize = 10000;
+    static int fsize = 1000000;
     static Random R = new Random();
     static
     {
@@ -49,6 +50,7 @@ public class PersistKVStoreTest
         collisionTest();
         multiTest();
 //    	
+        System.out.println("DONE!!!");
     	store.print();
     }
 
@@ -57,7 +59,7 @@ public class PersistKVStoreTest
         byte[] newV = store.get(k);
         if (Utils.isEquals(v, newV) == false)
         {
-            System.out.println("k=" + Utils.join(k, ",") + "|v=" + Utils.join(v, ",") + "|newv=" + Utils.join(newV, ","));
+//            System.out.println("k=" + Utils.join(k, ",") + "|v=" + Utils.join(v, ",") + "|newv=" + Utils.join(newV, ","));
             log.error("k=" + Utils.join(k, ",") + "|v=" + Utils.join(v, ",") + "|newv=" + Utils.join(newV, ","));
         }
     }
@@ -67,6 +69,7 @@ public class PersistKVStoreTest
         byte[] k = new byte[] { 18, 113, 101, 57 };
         byte[] v = new byte[] { 103, -60, 53, };
         store.put(k, v);
+        putToMap(k, v);
         testGet(k, v);
     }
 
@@ -96,24 +99,25 @@ public class PersistKVStoreTest
     {
         for (int i = 0; i < fsize /3; i++)
         {
-            byte[] k = new byte[R.nextInt(1*ksize - 1) + 1];
+            byte[] k = new byte[R.nextInt(10*ksize - 1) + 1];
                 R.nextBytes(k);
-            byte[] v = new byte[R.nextInt(1*vsize - 1) + 1];
+            byte[] v = new byte[R.nextInt(10*vsize - 1) + 1];
                 R.nextBytes(v);
             byte[] newV = null;
             try
             {
-                System.out.print("a-");
+//                System.out.print("-a-");
                 if (store.put(k, v))
                 {
-                    System.out.print("b-");
-                    putTo(map, k, v);
-                    System.out.print("c-");
+//                    System.out.print("b-");
+                    putToMap(k, v);
+//                    System.out.print("c-");
                     newV = store.get(k);
-                    System.out.print("d-");
+//                    System.out.print("d-");
                     if (Utils.isEquals(v, newV) == false)
                     {
-                        System.out.print("e-");
+//                        System.out.print("e-");
+                    	newV = store.get(k);
                         System.out.println("|fail0|k=" + Utils.join(k, ",") + "|v=" + Utils.join(v, ",") + "|newv="+newV);
                         log.error("|fail0|k=" + Utils.join(k, ",") + "|v=" + Utils.join(v, ",") + "|newV="+newV);
                         break;
@@ -124,7 +128,7 @@ public class PersistKVStoreTest
                     System.out.println("NO_SPACE");
                     break;
                 }
-                System.out.print("f-");
+//                System.out.print("f-");
                 // 随机测试一个
                 if(map.size() > 0)
                 {
@@ -132,51 +136,23 @@ public class PersistKVStoreTest
                 	{
 	                    List<byte[]> keyList = new ArrayList<byte[]>(map.keySet());
 	                    byte[] rk = keyList.get(R.nextInt(keyList.size()));
-	                    System.out.print("g-");
+//	                    System.out.print("g-");
 	                    byte[] v11 = map.remove(rk);
-	                    System.out.print("g1-");
+//	                    System.out.print("g1-");
 	                    byte[] v22 = store.remove(rk);
-	                    System.out.print("g2-");
+//	                    System.out.print("g2-");
 	                    if(!Utils.isEquals(v11, v22))
 	                    {
 	                    	System.out.println("remove and compare failed!!!v11="+Utils.join(v11, ",")+",v22="+Utils.join(v22, ","));
 	                    	break;
 	                    }
-	                    System.out.print("h-");
+//	                    System.out.print("h-");
                 	}
                 }
-                if(!match())
+                if(!matchStore())
                 	break;
-//                List<byte[]> keyList = new ArrayList<byte[]>();
-//                Iterator<byte[]> itr = store.keyIterator();
-//                i = 0;
-//                while(itr.hasNext())
-//                {
-//                    System.out.println(i++);
-//                    byte[] k1 = itr.next();
-////                    newV = store.get(k1);
-//                    keyList.add(k1);
-//                }
-//                for(byte[] k2 : map.keySet())
-//                {
-//                    boolean find = false;
-//                    byte[] k3 = null;
-//                    for(int ii=0;ii<keyList.size();ii++)
-//                    {
-//                        k3 = keyList.get(ii);
-//                        if (Utils.isEquals(v, newV) == true)
-//                        {
-//                            find = true;
-//                            break;
-//                        }
-//                    }
-//                    if(find==false)
-//                    {
-//                        System.out.println("|nofind|k2=" + Utils.join(k2, ",") + "|k3=" + Utils.join(k3, ","));
-//                        log.error("|nofind|k2=" + Utils.join(k2, ",") + "|k3=" + Utils.join(k3, ","));
-//                    }
-//                }
-                System.out.println();
+                if(!matchItr())
+                	break;
             }
             catch (Exception e)
             {
@@ -188,23 +164,27 @@ public class PersistKVStoreTest
             }
             System.out.println("i="+i +"|succ|k="+k.length+",v="+v.length+"|"+",k=" + Utils.join(k, ",") + "|v=" + Utils.join(v, ",") + "|succ");
             //log.info("i="+i +"|succ|k="+k.length+",v="+v.length+"|"+",k=" + Utils.join(k, ",") + "|v=" + Utils.join(v, ",") + "|succ");
-            System.out.println();
+//            System.out.println();
         }
     }
     
-    private static void putTo(ConcurrentHashMap<byte[], byte[]> map, byte[] key, byte[] value)
+    private static void putToMap(byte[] key, byte[] value)
     {
     	for(byte[] k : map.keySet())
     	{
     		if(Utils.isEquals(k, key))
     		{
     			map.remove(k);
+    			break;
     		}
     	}
     	map.put(key, value);
     }
     
-    private static boolean match()
+    /*
+     * 对比map与store中(k,v)，是否都一一对应
+     */
+    private static boolean matchStore()
     {
     	for(Entry<byte[], byte[]> e : map.entrySet())
     	{
@@ -212,12 +192,50 @@ public class PersistKVStoreTest
     		byte[] v = e.getValue();
     		if(!Utils.isEquals(v, v2))
     		{
-    			v2 = store.get(e.getKey());
+//    			v2 = store.get(e.getKey());
     			System.out.println("--->not match");
     			return false;
     		}
     	}
     	return true;
+    }
+    
+    /*
+     * 对应map与key迭代器，是否一一对应
+     */
+    private static boolean matchItr()
+    {
+    	int cnt = 0;
+    	Iterator<byte[]> itr = store.keyIterator();
+    	while(itr.hasNext())
+    	{
+    		byte[] k = itr.next();
+    		if(searchInMap(k))
+			{
+    			cnt ++;
+			}
+    		else
+    		{
+    			System.out.println("--->iterator failed!");
+    			return false;
+    		}
+    	}
+    	
+    	return cnt == map.size();
+    }
+    /*
+     * 在map中查找是否有此key
+     */
+    private static boolean searchInMap(byte[] key)
+    {
+    	for(byte[] k : map.keySet())
+    	{
+    		if(Utils.isEquals(k, key))
+    		{
+    			return true;
+    		}
+    	}
+    	return false;
     }
     
 }
